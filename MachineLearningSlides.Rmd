@@ -1,0 +1,193 @@
+---
+title: "Machine Learning"
+author: "John Hamre III"
+date: "August 11, 2017"
+output: slidy_presentation
+---
+
+## Overview
+
+In this presentation I show some of the ways computers can "learn" or be trained, and then predict classifications based off of training sets.
+
+## Bullet Points
+
+- To begin with machine learning I start with knn prediction. It is a powerful and straight forward algorithm to use in R
+- PCA clustering is demonstrated next, and is more complicated because it uses eigen values to project multi-dimensional data into two dimensions
+- Next, we go into tree-based classification methods of machine learning by looking at rpart and random forest algorithms 
+- After an important gene or factor is found it can be used as a measure of prediction
+-Finally, I end with clustering as a means of prediction by using k-means and PAM clustering
+
+## k-nearest neighbors algorithm (k-NN) is a non-parametric method used for classification and regression (wikipedia)
+
+```{r, warning=FALSE}
+
+library(HiDimDA)
+data("AlonDS")
+library(class)
+
+set.seed(1234)
+ind <- sample(2, nrow(AlonDS), replace=TRUE, prob=c(.39, 0.61))
+apo.training <- AlonDS[ind==1 , 2:2001]
+apo.test <- AlonDS[ind==2 , 2:2001]
+apo.trainlabels <- AlonDS[ind==1, 1]
+apo.testlabels <- AlonDS[ind==2, 1]
+apo_pred <- knn(apo.training, apo.test, apo.trainlabels, k=1)
+table(apo_pred, apo.testlabels)
+
+```
+
+## PCA dimension reduction
+
+```{r}
+alon.data <- (AlonDS[1:dim(AlonDS)[1], 2:dim(AlonDS)[2]])
+alon.names <- read.csv("data/alon.names.csv", header=F)
+Alon.cl <- c(0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,0,0,0,0,1,0,1,1,0,0,1,1,0,0,0,0,1,0,1)
+AlonFactor <- factor(Alon.cl,levels=0:1, labels= c("colonc","healthy"))
+talon.data <- t(alon.data)
+eigen(cor(talon.data))$values[1:5]
+data <- talon.data; p <- ncol(data); n <- nrow(data) ; nboot<-1000
+eigenvalues <- array(dim=c(nboot,p))
+for (i in 1:nboot) {
+    dat.star <- data[sample(1:n,replace=TRUE),]
+    eigenvalues[i,] <- eigen(cor(dat.star))$values
+}
+for (j in 1:5) {
+    print(quantile(eigenvalues[,j],c(0.025,0.975)))
+}
+
+
+```
+
+## PCA results
+
+```{r}
+sum(eigen(cor(talon.data))$values[1:5])/62*100
+#Thus, the first five components represent more than 87% of the variance in the data. The data can allow for a reduction in dimensions from 
+#sixty two data points to five, while still capturing over 87% of the total variance
+
+# to verify that the correlations between the patients are positive
+# we run;
+-eigen(cor(talon.data))$vec[,1:5]
+
+
+```
+
+
+## PCA results in five dimensions
+```{r}
+#From the previous slide we can match up the negative and positive signs with what we actually observed and express as;
+Alon.cl
+#By matching these we find that the 3rd and 4th dimensions matched the real data best. We can plot these with a biplot to show vectors
+biplot(princomp(data,cor=TRUE),choices = c(3,4), pc.biplot=TRUE,cex=0.5,expand=0.8, main = "PCA Clustering of Alon et al. Data")
+#There is a clear seperation from the left and right in the biplot
+
+```
+
+## PCA results; finding the top genes 
+```{r}
+#No we can prints the first ten gene names with respect to the third principal comonent to find out what the main genes of differentiating diseased and healthy state
+pca <- princomp(talon.data, center = TRUE, cor=TRUE, scores=TRUE) 
+o <- order(pca$scores[,3]) 
+alon.names[o[1:10],6] 
+
+pr.out =prcomp (alon.data , scale =TRUE)
+
+
+
+```
+
+## rpart finds important genes with recursive partioning and regression to make predictions 
+```{r, warning=FALSE, message=FALSE}
+
+library(rpart.plot)
+
+row.names(talon.data)<- paste("gene", 1:2000, sep = "") 
+
+alonRpart <- rpart(AlonFactor~., data=alon.data, method="class", cp=0.001) 
+prp(alonRpart,  branch.lwd=4,  branch.col="blue",  extra=101, main="Recursive Partitioning and Regression Tree of Alon et al Data") 
+alon.names[ 16, 6]
+alon.names[ 24, 6]
+
+
+```
+## Random forests or random decision forests operate by constructing a multitude of decision trees at training time and outputting mean prediction (regression) of the individual trees. (wikipedia)
+```{r, warning=FALSE, message=FALSE}
+library(randomForest)
+set.seed(1234)
+alon.rf <- randomForest(grouping ~ ., data=AlonDS, importance=TRUE,
+                      proximity=TRUE)
+
+#We can predict the diseased state
+ print(alon.rf)
+ 
+```
+
+##Random forest accuracy measures by best gene
+```{r, warning=FALSE, message=FALSE}
+ 
+## Random forest plot of gene accuracy 
+
+ varImpPlot(alon.rf,
+            n.var = 25,
+            pch=19,
+             main=NULL,
+             col="blue",
+             gcolor="blue",
+             lcolor="black")
+#Next we can find and print the genes that give the most accuracy
+alon.names[249,6]
+alon.names[1772,6]
+alon.names[1671,6]
+
+```
+
+##Desmin gene prediction of diagnosis by expression level
+
+```{r, warning=FALSE, message=FALSE}
+
+colon.data <- read.table("data/AlonGene.txt")
+alonLabels<-factor(Alon.cl, levels = 0:1, labels=c("colonc","healthy"));desmin <- grep("Human desmin gene, complete cds",alon.names[,6], ignore.case = TRUE)
+alonPredictor <- factor(colon.data[desmin,]> 1700,levels=c("FALSE","TRUE"), labels=c("colonc","healthy"))
+table(alonPredictor,alonLabels)
+
+```
+
+##We can also analyze a specific gene to measure its change of true positive or negative
+```{r, warning=FALSE, message=FALSE}
+
+library(ROCR)
+alonLabels <- factor(Alon.cl,levels=0:1,labels= c("FALSE","TRUE"))
+desmin <- grep("Human desmin gene, complete cds",alon.names[,6], ignore.case = TRUE)
+  pred <- prediction(talon.data[desmin,], alonLabels)
+  perf <- performance(pred, "tpr", "fpr" )
+  plot(perf,main ="True Positive Rate of Human Desmin Gene",
+         lwd=4,
+        col="magenta")
+performance(pred,"auc")
+
+```
+
+##K-means clustering is used after the top genes are found
+```{r, warning=FALSE, message=FALSE}
+RibosomalProtein <- grep("40S RIBOSOMAL PROTEIN S18",alon.names[,6], ignore.case = TRUE)
+Desmin <- grep("Human desmin gene, complete cds",alon.names[,6], ignore.case = TRUE)
+clusdata <- data.frame(talon.data[Desmin,],talon.data[RibosomalProtein,])
+colnames(clusdata)<- c("Desmin", "40S Ribosomal Protein")
+cl <- kmeans(clusdata, 2, 10)
+plot(clusdata,    pch=as.numeric(AlonFactor) + 15,   col=as.numeric(AlonFactor) + 1,main = "K-means Center of Desmin and 40s Ribosomal Protein Clustering")
+legend("topright",
+           legend=c("Colon Cancer","Healthy"),
+           pch=16:17,
+           col=c(2,3))
+ points(cl$centers, col=c(3,2), pch = 7, lwd=1)
+
+```
+##Here I use PAM clustering with the genes 40s Ribosomal Protein and Desmin
+```{r, warning=FALSE, message=FALSE}
+##Desmin gene prediction of diagnosis by expression level
+library(cluster)
+pamx <- pam(clusdata, 2)
+plot(pamx,main="Pam Clustering by 40s Ribosomal Protein and Desmin")
+legend("topright", legend=c("Colon Cancer","Healthy"), pch=16:17, col=c(2,3))
+```
+
