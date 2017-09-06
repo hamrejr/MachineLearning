@@ -1,0 +1,362 @@
+\documentclass{article}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+\documentclass{article}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+
+<<tidy=TRUE, message=FALSE, warning=FALSE>>=
+install.packages("HiDimDA")
+
+library(HiDimDA)
+data("AlonDS")
+#install.packages("plsgenomics")
+library(plsgenomics)
+data(Colon)
+#Install.packages("subspace")
+library(subspace)
+library(gplots)
+library(edgeR)
+library(ROCR)
+library(class)
+library(caret)
+library(ISLR)
+library(e1071)
+#install.packages("rpart.plot")
+library(rpart); 
+library(multtest) ;
+library(rpart.plot)
+library(genefilter)
+library(randomForest)
+#View(subspace_dataset)
+library(cluster)
+
+@
+
+
+
+
+<<>>=
+
+#
+colon.data <- read.table("data/AlonGene.txt")
+colon_matrix <- as.matrix((colon.data[1:dim(colon.data)[1], 1:dim(colon.data)[2]]))
+colon.names <- read.table("data/AlonName1.txt")
+alon_matrix <- as.matrix((AlonDS[1:dim(AlonDS)[1], 2:dim(AlonDS)[2]]))
+alon.data <- (AlonDS[1:dim(AlonDS)[1], 2:dim(AlonDS)[2]])
+alon.names <- read.csv("data/alon.names.csv", header=F)
+Alon.cl <- c(0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,0,0,0,0,1,0,1,1,0,0,1,1,0,0,0,0,1,0,1)
+AlonFactor <- factor(Alon.cl,levels=0:1, labels= c("colonc","healthy"))
+talon.data <- t(alon.data)
+talon_matrix<- t(alon_matrix)
+
+#Color function
+Cols=function (vec ){
+    cols=rainbow (length (unique (vec )))
+    return (cols[as.numeric (as.factor (vec))])
+}
+@
+
+
+
+Shapiro Test of Normality
+<<tidy=TRUE>>=
+
+sh <- apply(talon_matrix[,AlonFactor=="colonc"],1,function(x) shapiro.test(x)$p.value)
+ sum(sh > 0.05)/nrow(talon_matrix) 
+
+ 
+ sh <- apply(talon_matrix[,AlonFactor=="healthy"],1,function(x) shapiro.test(x)$p.value)
+ sum(sh > 0.05)/nrow(talon_matrix) 
+ 
+
+@
+ 
+\pagebreak
+General Overview and Outliers
+<<tidy=TRUE,fig=TRUE>>=
+
+ 
+boxplot(colMeans(colon.data), pch = 19, col = "blue", main= "Mean of All Samples")
+boxplot.stats(colMeans(colon.data))
+
+healthy<-(talon.data[, AlonFactor=="healthy"])
+colonc<-(talon.data[, AlonFactor=="colonc"])
+tiff("Plot1.tiff")
+
+
+boxplot(colon_matrix, col="blue", main = "All Samples Overview")
+
+boxplot(talon.data[, AlonFactor=="healthy"], col = "green", main= "All Healthy Samples" )
+
+boxplot.stats(colMeans(healthy))
+
+boxplot(talon.data[, AlonFactor=="colonc"], col = "red", main = "All Colon Cancer Samples")
+
+boxplot.stats(colMeans(colonc))
+
+x <- (colMeans(healthy))
+ 
+y <- (colMeans(colonc))
+
+
+boxplot(x, y, col = c("green", "red"), main ="Mean of Healthy and Colon Cancer Sample Microarray Values", names=c("Healthy","ColonC"))
+tiff("Plot1.tiff")
+dev.off()
+
+
+@
+
+\pagebreak
+Prediction of Diagnosis by KNN
+<<tidy=TRUE>>=
+
+
+set.seed(1234)
+ind <- sample(2, nrow(AlonDS), replace=TRUE, prob=c(.39, 0.61))
+apo.training <- AlonDS[ind==1, 2:2001]
+apo.test <- AlonDS[ind==2, 2:2001]
+apo.trainlabels <- AlonDS[ind==1, 1]
+apo.testlabels <- AlonDS[ind==2, 1]
+apo_pred <- knn(apo.training, apo.test, apo.trainlabels, k=1)
+table(apo_pred, apo.testlabels)
+@
+
+\textbf{Narrowing the Search to Specific Genes}
+
+Finding Top Genes by Subtracting the Mean Difference Between Diagnosis
+and Healthy Samples
+
+<<tidy=TRUE, fig=TRUE>>=
+
+meanhealthy <- apply(alon_matrix[AlonFactor=="healthy",],2,mean)
+meancolonc <- apply(alon_matrix[AlonFactor=="colonc",],2,mean)
+
+o <- order(abs(meancolonc-meanhealthy), decreasing = TRUE)
+ biomarkers50 = alon_matrix[,o[1:20]]
+ heatmap.2(biomarkers50,Rowv = NA, 
+           Colv = NA, 
+           scale = "row", 
+           col=greenred(75),dendrogram="none", 
+          key=FALSE, 
+          symkey=FALSE,
+          density.info="none", trace="none", main = )
+
+ 
+cor(biomarkers50[3,], biomarkers50[42,])
+cor(biomarkers50[48,], biomarkers50[42,])
+
+@
+
+\pagebreak
+PCA Clustering
+<<tidy=TRUE>>=
+
+
+eigen(cor(talon.data))$values[1:5]
+
+data <- talon.data; p <- ncol(data); n <- nrow(data) ; nboot<-1000
+eigenvalues <- array(dim=c(nboot,p))
+
+for (i in 1:nboot) {
+    dat.star <- data[sample(1:n,replace=TRUE),]
+    eigenvalues[i,] <- eigen(cor(dat.star))$values
+}
+
+for (j in 1:5) {
+    print(quantile(eigenvalues[,j],c(0.025,0.975)))
+}
+
+sum(eigen(cor(talon.data))$values[1:5])/62*100
+
+#Thus, the first five components represent more than 87% of the variance in the data. The data can allow for a reduction in dimensions from 
+#sixty two data points to five, while still capturing over 87% of the total variance
+
+# to verify that the correlations between the patients are positive
+# we run;
+-eigen(cor(talon.data))$vec[,1:5]
+#This shows that component 3 very closely matches the data between cononc and healthy 
+
+biplot(princomp(data,cor=TRUE),choices = c(3,4), pc.biplot=TRUE,cex=0.5,expand=0.8, main = "PCA Clustering of Components 3 and 4")
+
+#Prints the first ten gene names with respect to the third principal comonent.
+pca <- princomp(talon.data, center = TRUE, cor=TRUE, scores=TRUE) 
+o <- order(pca$scores[,3]) 
+alon.names[o[1:10],6] 
+
+pr.out =prcomp (alon.data , scale =TRUE)
+ 
+pairs(pr.out$x [,1:4], col =Cols(AlonFactor), pch =19, main="Pairs Plot of Principle Components 1 Through 4")
+
+
+@
+
+\pagebreak
+Find Important Genes for Tree-based Classification Using rpart 
+<<tidy=TRUE>>=
+
+
+row.names(talon.data)<- paste("gene", 1:2000, sep = "") 
+
+alonRpart <- rpart(AlonFactor~., data=alon.data, method="class", cp=0.001) 
+prp(alonRpart,  branch.lwd=4,  branch.col="blue",  extra=101, main="Recursive Partitioning and Regression Tree") 
+alon.names[ 16, 6]
+alon.names[ 24, 6]
+
+@
+
+
+Random Forest
+<<tidy=TRUE>>=
+
+set.seed(1234)
+alon.rf <- randomForest(grouping ~ ., data=AlonDS, importance=TRUE,
+                      proximity=TRUE)
+ print(alon.rf)
+ 
+ varImpPlot(alon.rf,
+            n.var = 25,
+            pch=19,
+             main=NULL,
+             col="blue",
+             gcolor="blue",
+             lcolor="black")
+ 
+ alon.names[249,6]
+alon.names[1772,6]
+alon.names[1671,6]
+@
+
+
+\pagebreak
+\textbf{Ribosmal, Muscular, and Desmin as Genes of Importance}
+<<tidy=TRUE>>=
+
+
+factor <- factor(Alon.cl) 
+a1 <- grep("RIBOSOMAL",alon.names[,6], ignore.case = TRUE)
+b2 <- grep("muscle",alon.names[,6], ignore.case = TRUE)
+c3 <- grep("desmin",alon.names[,6], ignore.case = TRUE)
+o <-c(a1, b2, c3)
+
+
+#ttest of the ribosomal genes
+pt <- apply(talon.data, 1, function(x) t.test(x ~ AlonFactor)$p.value) 
+oo <- o[pt[o]<0.01]
+
+#plotting 
+Z <- as.matrix(scale(talon.data, center = TRUE, scale = TRUE)) 
+K <- eigen(cor(Z)) 
+P <- Z %*% -K$vec[,3:4] 
+leu <- data.frame(P[oo,], row.names= oo) 
+plot(leu,xlim=c(-15,15), ylim=c(-7,7), main="Student's t-test (P<0.01) of Principle Component 3 and 4 of Ribosomal(1), Muscle(2), and Desmin Genes(3)", pch=19, cex=1.2, xlab="Principal Component 3", ylab="Principal Component 4", col="darkgreen")
+text(x = leu$X1, y=leu$X2, labels=rownames(leu), pos = 1, col="blue") 
+fac <- as.integer(oo %in% a1) + 2 * as.integer(oo %in% b2) + 3 * as.integer(oo %in% c3) 
+text(x = leu$X1, y=leu$X2, labels=fac, pos = 3, col="red")
+
+cl <- hclust(dist(leu,method="euclidian"),method="single")
+
+plot(cl,lwd=3,col="blue", col.axis = "brown", ylab="Distance",xlab="Hierarchical Clustering Dendrogram of 'Ribosomal,' 'Muscle,' and 'Desmin' Genes",hang=-1,main=NA, sub=NA,axes=FALSE) 
+ axis(side = 2, at = seq(0, 20, 1), col = "brown",labels = TRUE, lwd = 4)
+
+alon.names[26,6]
+alon.names[249,6] 
+ 
+ 
+@
+
+\pagebreak
+
+Finding Genes Most Similar to the Expressions of 40S Ribosomal Protein
+<<tidy=TRUE>>=
+
+ribo <- grep("40S RIBOSOMAL PROTEIN S18",alon.names[,6], ignore.case = TRUE)
+closeg <- genefinder(talon_matrix, ribo, 10, method = "euc", scale = "none")
+closeg
+alon.names[closeg[[1]][[1]],6]
+boxplot(talon.data[ribo[[1]][[1]][1],] ~AlonFactor, main="Boxplot of Genes with the Most Similar Expressions to 40S Ribosomal Protein",col = c("red", "green"))
+
+@
+
+\pagebreak
+Desmin Gene Prediction of Diagnosis by Expression Level
+<<tidy=TRUE>>=
+
+
+
+
+alonLabels<-factor(Alon.cl, levels = 0:1, labels=c("colonc","healthy"));desmin <- grep("Human desmin gene, complete cds",alon.names[,6], ignore.case = TRUE)
+alonPredictor <- factor(colon.data[desmin,]> 1700,levels=c("FALSE","TRUE"), labels=c("colonc","healthy"))
+table(alonPredictor,alonLabels)
+
+@
+
+True Positive Rate of Desmin
+<<tidy=TRUE>>=
+
+
+alonLabels <- factor(Alon.cl,levels=0:1,labels= c("FALSE","TRUE"))
+desmin <- grep("Human desmin gene, complete cds",alon.names[,6], ignore.case = TRUE)
+  pred <- prediction(talon.data[desmin,], alonLabels)
+  perf <- performance(pred, "tpr", "fpr" )
+  plot(perf,main ="True Positive Rate of Human Desmin Gene", ylab = "True Positive Rate", xlab = "False Positive Rate",
+         lwd=4,
+        col="magenta")
+performance(pred,"auc")
+
+@
+
+
+K-means and Pam Clustering of Desmin and 40S Ribosomal Protein
+<<tidy=TRUE>>=
+ 
+RibosomalProtein <- grep("40S RIBOSOMAL PROTEIN S18",alon.names[,6], ignore.case = TRUE)
+Desmin <- grep("Human desmin gene, complete cds",alon.names[,6], ignore.case = TRUE)
+
+clusdata <- data.frame(talon.data[Desmin,],talon.data[RibosomalProtein,])
+colnames(clusdata)<- c("Desmin", "40S Ribosomal Protein")
+cl <- kmeans(clusdata, 2, 10)
+
+plot(clusdata,    pch=as.numeric(AlonFactor) + 15,   col=as.numeric(AlonFactor) + 1,main = "K-means Center of Desmin and 40S Ribosomal Protein Clustering")
+ 
+legend("topright",
+           legend=c("Colon Cancer","Healthy"),
+           pch=16:17,
+           col=c(2,3))
+ points(cl$centers, col=c(3,2), pch = 7, lwd=1)
+ 
+text(x=2517.4713,y=             4830.3512, label= "T30", cex = 1) 
+ text(x=1627.2700       , y=     1752.4083, label= "T33", cex =1)
+  text(x=2787.0425  ,y=           2187.0452, label= "T36", cex =1)
+  text(x=183.6213  ,y=           6187.4679, label= "N8", cex =1)
+ 
+  text(x=754.1900 ,y=            5670.2976, label= "N34", cex =1)
+  text(x= 221.1838   ,y=          3509.0940, label= "N36", cex =1)
+  
+plot(hclust(dist(clusdata,method="euclidian"),method="single"),lwd=3,
+ col="blue",
+ col.axis = "brown", ylab="Distance", xlab="",  hang=-1, main= "Euclidian Distance of Genes Similar 40S Ribosomal Protein and Desmin",
+ sub=NA,
+  axes=FALSE)
+axis(side=2,at=seq(0,2000,100),col="brown", labels=TRUE,lwd=4)
+
+pamx <- pam(clusdata, 2)
+plot(pamx,main="Pam Clustering by 40S Ribosomal Protein and Desmin", xlab="40S Ribosomal Protein",ylab="Desmin")
+
+legend("topright", legend=c("Colon Cancer","Healthy"), pch=16:17, col=c(2,3))
+
+
+
+@
+ 
+
+
+\end{document}
+
+
+
+\end{document}
